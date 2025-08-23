@@ -56,33 +56,52 @@ def get_plugins(plugin_type):
         print(f"Error getting {plugin_type}: {e}")
         return []
 
-def run_garak_command(args, output_queue):
-    """
-    Runs a garak command in a separate thread and puts the output on a queue.
+class GarakProcess:
+    def __init__(self):
+        self.process = None
+        self.stop_event = threading.Event()
 
-    :param args: A list of command-line arguments for garak.
-    :param output_queue: A queue.Queue object to put output lines on.
-    """
-    command = ["python", "-m", "garak"] + args
-    try:
-        process = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            universal_newlines=True,
-        )
+    def run(self, args, output_queue):
+        """
+        Runs a garak command and puts the output on a queue.
 
-        for line in iter(process.stdout.readline, ''):
-            output_queue.put(line)
+        :param args: A list of command-line arguments for garak.
+        :param output_queue: A queue.Queue object to put output lines on.
+        """
+        command = ["python", "-m", "garak"] + args
+        self.stop_event.clear()
+        try:
+            self.process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                universal_newlines=True,
+            )
 
-        process.stdout.close()
-        process.wait()
+            for line in iter(self.process.stdout.readline, ''):
+                if self.stop_event.is_set():
+                    break
+                output_queue.put(line)
 
-    except FileNotFoundError:
-        output_queue.put("Error: 'python' command not found. Make sure Python is in your PATH.\n")
-    except Exception as e:
-        output_queue.put(f"An unexpected error occurred: {e}\n")
-    finally:
-        output_queue.put(None) # Sentinel value to indicate completion
+            self.process.stdout.close()
+            self.process.wait()
+
+        except FileNotFoundError:
+            output_queue.put("Error: 'python' command not found. Make sure Python is in your PATH.\n")
+        except Exception as e:
+            output_queue.put(f"An unexpected error occurred: {e}\n")
+        finally:
+            self.process = None
+            output_queue.put(None) # Sentinel value to indicate completion
+
+    def stop(self):
+        """Stops the running garak process."""
+        if self.process and self.process.poll() is None:
+            self.stop_event.set()
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.process.kill()

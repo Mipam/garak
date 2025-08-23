@@ -76,4 +76,5 @@ This document outlines the tasks for developing the Garak GUI, based on the Prod
 
 - [ ] **Packaging and Distribution:**
     - [ ] Create build scripts to package the application into standalone executables for each platform (e.g., using PyInstaller or cx_Freeze).
+    - [ ] Run the following command to create the executable: `pyinstaller --name garak-gui --onefile --windowed --add-data "garak:garak" garak_gui/main.py`
     - [ ] Write documentation on how to install and use the Garak GUI.
