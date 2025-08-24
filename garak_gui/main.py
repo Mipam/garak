@@ -128,6 +128,18 @@ class GarakGUI(customtkinter.CTk):
         parallel_attempts_entry.grid(row=4, column=1, columnspan=2, padx=10, pady=5, sticky="ew")
         Tooltip(parallel_attempts_entry, "Number of parallel attempts to make per probe (default 1).")
 
+        customtkinter.CTkLabel(frame, text="Report File").grid(row=5, column=0, padx=10, pady=5, sticky="w")
+        self.report_file_var = customtkinter.StringVar()
+        report_file_entry = customtkinter.CTkEntry(frame, textvariable=self.report_file_var)
+        report_file_entry.grid(row=5, column=1, columnspan=2, padx=10, pady=5, sticky="ew")
+        Tooltip(report_file_entry, "Specify a file to write the report to (e.g. report.avid.json).")
+
+        customtkinter.CTkLabel(frame, text="Taxonomy").grid(row=6, column=0, padx=10, pady=5, sticky="w")
+        self.taxonomy_var = customtkinter.StringVar()
+        taxonomy_entry = customtkinter.CTkEntry(frame, textvariable=self.taxonomy_var)
+        taxonomy_entry.grid(row=6, column=1, columnspan=2, padx=10, pady=5, sticky="ew")
+        Tooltip(taxonomy_entry, "Specify the MISP taxonomy to use for the report.")
+
     def _create_run_settings_frame(self):
         frame = customtkinter.CTkFrame(self.config_tab)
         frame.grid(row=1, column=0, padx=10, pady=10, sticky="ew")
@@ -182,16 +194,39 @@ class GarakGUI(customtkinter.CTk):
         Tooltip(model_name_entry, "The name of the model to test (e.g. gpt-4, meta-llama/Llama-2-7b-chat-hf).")
 
         # Probes
-        probes_frame = self._create_plugin_selection_frame(frame, "probes", self.probe_vars)
+        probes_frame = customtkinter.CTkFrame(frame, fg_color="transparent")
         probes_frame.grid(row=1, column=1, padx=5, pady=5, sticky="nsew")
+        probes_frame.grid_rowconfigure(1, weight=1)
+        probes_frame.grid_columnconfigure(0, weight=1)
+
+        probes_sub_frame = customtkinter.CTkFrame(probes_frame)
+        probes_sub_frame.grid(row=0, column=0, padx=0, pady=0, sticky="ew")
+        probes_sub_frame.grid_columnconfigure(1, weight=1)
+
+        customtkinter.CTkLabel(probes_sub_frame, text="Filter by Tags:").grid(row=0, column=0, padx=5, pady=5)
+        self.probe_tags_var = customtkinter.StringVar()
+        probe_tags_entry = customtkinter.CTkEntry(probes_sub_frame, textvariable=self.probe_tags_var)
+        probe_tags_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+        Tooltip(probe_tags_entry, "Filter probes by tags, comma-separated.")
+
+        probes_selection_frame = self._create_plugin_selection_frame(probes_frame, "probes", self.probe_vars)
+        probes_selection_frame.grid(row=1, column=0, padx=0, pady=5, sticky="nsew")
+
 
         # Detectors & Buffs
         sub_frame = customtkinter.CTkFrame(frame, fg_color="transparent")
         sub_frame.grid(row=1, column=2, padx=5, pady=5, sticky="nsew")
         sub_frame.grid_columnconfigure(0, weight=1)
-        sub_frame.grid_rowconfigure([0,1], weight=1)
+        sub_frame.grid_rowconfigure([0,2], weight=1)
+
         detectors_frame = self._create_plugin_selection_frame(sub_frame, "detectors", self.detector_vars)
         detectors_frame.grid(row=0, column=0, sticky="nsew")
+
+        self.extended_detectors_var = customtkinter.BooleanVar()
+        extended_detectors_cb = customtkinter.CTkCheckBox(sub_frame, text="Extended Detectors", variable=self.extended_detectors_var)
+        extended_detectors_cb.grid(row=1, column=0, padx=10, pady=5, sticky="w")
+        Tooltip(extended_detectors_cb, "Use extended detectors.")
+
         buffs_frame = self._create_plugin_selection_frame(sub_frame, "buffs", self.buff_vars)
         buffs_frame.grid(row=1, column=0, sticky="nsew", pady=(10,0))
 
@@ -200,25 +235,23 @@ class GarakGUI(customtkinter.CTk):
         options_frame.grid(row=2, column=0, columnspan=3, padx=5, pady=10, sticky="ew")
         customtkinter.CTkLabel(options_frame, text="Plugin Options (key=value, space-separated)", font=customtkinter.CTkFont(weight="bold")).pack(anchor="w", padx=10, pady=5)
 
-        customtkinter.CTkLabel(options_frame, text="Generator Options:").pack(anchor="w", padx=10)
-        generator_options_entry = customtkinter.CTkEntry(options_frame, textvariable=self.generator_options_var)
-        generator_options_entry.pack(fill="x", padx=10, pady=(0,5))
-        Tooltip(generator_options_entry, "Options for the generator, in key=value format, separated by spaces.")
+        self._create_option_file_picker(options_frame, "Generator", self.generator_options_var)
+        self._create_option_file_picker(options_frame, "Probe", self.probe_options_var)
+        self._create_option_file_picker(options_frame, "Detector", self.detector_options_var)
+        self._create_option_file_picker(options_frame, "Buff", self.buff_options_var)
 
-        customtkinter.CTkLabel(options_frame, text="Probe Options:").pack(anchor="w", padx=10)
-        probe_options_entry = customtkinter.CTkEntry(options_frame, textvariable=self.probe_options_var)
-        probe_options_entry.pack(fill="x", padx=10, pady=(0,5))
-        Tooltip(probe_options_entry, "Options for probes, in key=value format, separated by spaces.")
+    def _create_option_file_picker(self, parent, name, var):
+        frame = customtkinter.CTkFrame(parent, fg_color="transparent")
+        frame.pack(fill="x", padx=10, pady=5)
+        frame.grid_columnconfigure(0, weight=1)
 
-        customtkinter.CTkLabel(options_frame, text="Detector Options:").pack(anchor="w", padx=10)
-        detector_options_entry = customtkinter.CTkEntry(options_frame, textvariable=self.detector_options_var)
-        detector_options_entry.pack(fill="x", padx=10, pady=(0,5))
-        Tooltip(detector_options_entry, "Options for detectors, in key=value format, separated by spaces.")
+        customtkinter.CTkLabel(frame, text=f"{name} Options:").grid(row=0, column=0, sticky="w")
+        entry = customtkinter.CTkEntry(frame, textvariable=var)
+        entry.grid(row=1, column=0, sticky="ew")
+        Tooltip(entry, f"Options for {name.lower()}s, in key=value format, separated by spaces.")
 
-        customtkinter.CTkLabel(options_frame, text="Buff Options:").pack(anchor="w", padx=10)
-        buff_options_entry = customtkinter.CTkEntry(options_frame, textvariable=self.buff_options_var)
-        buff_options_entry.pack(fill="x", padx=10, pady=(0,10))
-        Tooltip(buff_options_entry, "Options for buffs, in key=value format, separated by spaces.")
+        button = customtkinter.CTkButton(frame, text="Load File...", width=100, command=lambda: self.load_option_file(var))
+        button.grid(row=1, column=1, padx=(10,0))
 
 
     def _create_plugin_selection_frame(self, parent, plugin_type, var_dict):
@@ -248,6 +281,11 @@ class GarakGUI(customtkinter.CTk):
         self.stop_button = customtkinter.CTkButton(frame, text="Stop Scan", command=self.stop_scan, state="disabled")
         self.stop_button.grid(row=0, column=1, padx=(5, 0), sticky="ew")
 
+        self.progress_bar = customtkinter.CTkProgressBar(frame, orientation="horizontal")
+        self.progress_bar.grid(row=1, column=0, columnspan=2, pady=(10, 0), sticky="ew")
+        self.progress_bar.set(0)
+
+
         # Config Preset Buttons
         preset_frame = customtkinter.CTkFrame(self.config_tab, fg_color="transparent")
         preset_frame.grid(row=4, column=0, pady=10, padx=10, sticky="ew")
@@ -270,6 +308,11 @@ class GarakGUI(customtkinter.CTk):
         top_frame.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
         self.refresh_reports_button = customtkinter.CTkButton(top_frame, text="Refresh Reports", command=self.refresh_reports)
         self.refresh_reports_button.pack(side="left", padx=(0, 10))
+        self.delete_report_button = customtkinter.CTkButton(top_frame, text="Delete Report", command=self.delete_report, state="disabled")
+        self.delete_report_button.pack(side="left", padx=(0, 10))
+        self.rerun_scan_button = customtkinter.CTkButton(top_frame, text="Re-run Scan", command=self.rerun_scan, state="disabled")
+        self.rerun_scan_button.pack(side="left")
+
 
         # Main frame with two panes
         main_frame = customtkinter.CTkFrame(self.reports_tab, fg_color="transparent")
@@ -286,6 +329,8 @@ class GarakGUI(customtkinter.CTk):
         self.report_listbox = tkinter.Listbox(report_list_frame, bg="#2b2b2b", fg="white", highlightthickness=0, selectbackground="#1f6aa5")
         self.report_listbox.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
         self.report_listbox.bind("<<ListboxSelect>>", self.on_report_selected)
+        self.report_listbox.bind("<FocusOut>", self.on_report_deselected)
+
 
         # Right pane for report content
         report_content_frame = customtkinter.CTkFrame(main_frame)
@@ -302,6 +347,8 @@ class GarakGUI(customtkinter.CTk):
         # System Settings
         if self.verbose_var.get(): args.append("-v")
         if self.report_prefix_var.get(): args.extend(["--report_prefix", self.report_prefix_var.get()])
+        if self.report_file_var.get(): args.extend(["--report", self.report_file_var.get()])
+        if self.taxonomy_var.get(): args.extend(["--taxonomy", self.taxonomy_var.get()])
         if self.narrow_output_var.get(): args.append("--narrow_output")
         if self.parallel_requests_var.get(): args.extend(["--parallel_requests", self.parallel_requests_var.get()])
         if self.parallel_attempts_var.get(): args.extend(["--parallel_attempts", self.parallel_attempts_var.get()])
@@ -323,19 +370,34 @@ class GarakGUI(customtkinter.CTk):
         selected_probes = [name for name, var in self.probe_vars.items() if var.get()]
         if selected_probes: args.extend(["--probes", ",".join(selected_probes)])
 
+        if self.probe_tags_var.get():
+            args.extend(["--probe_tags", self.probe_tags_var.get()])
+
         selected_detectors = [name for name, var in self.detector_vars.items() if var.get()]
         if selected_detectors: args.extend(["--detectors", ",".join(selected_detectors)])
+        if self.extended_detectors_var.get(): args.append("--extended_detectors")
 
         selected_buffs = [name for name, var in self.buff_vars.items() if var.get()]
         if selected_buffs: args.extend(["--buffs", ",".join(selected_buffs)])
 
         # Plugin Options
-        if self.generator_options_var.get(): args.extend(["--generator_options", self.generator_options_var.get()])
-        if self.probe_options_var.get(): args.extend(["--probe_options", self.probe_options_var.get()])
-        if self.detector_options_var.get(): args.extend(["--detector_options", self.detector_options_var.get()])
-        if self.buff_options_var.get(): args.extend(["--buff_options", self.buff_options_var.get()])
+        self._add_plugin_options_args(args, "generator", self.generator_options_var)
+        self._add_plugin_options_args(args, "probe", self.probe_options_var)
+        self._add_plugin_options_args(args, "detector", self.detector_options_var)
+        self._add_plugin_options_args(args, "buff", self.buff_options_var)
 
         return args
+
+    def _add_plugin_options_args(self, args, name, var):
+        value = var.get()
+        if not value:
+            return
+
+        # Check if the value is a file path
+        if os.path.isfile(value):
+            args.extend([f"--{name}_option_file", value])
+        else:
+            args.extend([f"--{name}_options", value])
 
     def start_scan(self):
         """Builds arguments from the UI and starts the Garak scan."""
@@ -359,6 +421,7 @@ class GarakGUI(customtkinter.CTk):
             return
 
         self.output_textbox.insert("end", f"Running Garak with command:\npython -m garak {' '.join(garak_args)}\n\n")
+        self.progress_bar.start()
         self.output_queue = queue.Queue()
         self.garak_thread = threading.Thread(target=self.run_garak_thread, args=(garak_args, self.output_queue))
         self.garak_thread.daemon = True
@@ -384,6 +447,8 @@ class GarakGUI(customtkinter.CTk):
                     self.start_button.configure(state="normal")
                     self.stop_button.configure(state="disabled")
                     self.garak_process = None
+                    self.progress_bar.stop()
+                    self.progress_bar.set(0)
                     return
                 self.output_textbox.insert("end", line)
                 self.output_textbox.see("end")
@@ -409,6 +474,9 @@ class GarakGUI(customtkinter.CTk):
         if not selection:
             return
 
+        self.delete_report_button.configure(state="normal")
+        self.rerun_scan_button.configure(state="normal")
+
         selected_report = event.widget.get(selection[0])
 
         self.report_content_textbox.configure(state="normal")
@@ -428,6 +496,47 @@ class GarakGUI(customtkinter.CTk):
             self.report_content_textbox.insert("end", f"Error reading report file: {e}")
 
         self.report_content_textbox.configure(state="disabled")
+
+    def on_report_deselected(self, event):
+        self.report_listbox.selection_clear(0, "end")
+        self.delete_report_button.configure(state="disabled")
+        self.rerun_scan_button.configure(state="disabled")
+
+    def delete_report(self):
+        selection = self.report_listbox.curselection()
+        if not selection:
+            return
+
+        selected_report = self.report_listbox.get(selection[0])
+        try:
+            os.remove(selected_report)
+            self.refresh_reports()
+        except Exception as e:
+            self.output_textbox.insert("end", f"Error deleting report file: {e}\n")
+
+    def rerun_scan(self):
+        selection = self.report_listbox.curselection()
+        if not selection:
+            return
+
+        selected_report = self.report_listbox.get(selection[0])
+        try:
+            with open(selected_report, "r") as f:
+                first_line = f.readline()
+                report_data = json.loads(first_line)
+                config = report_data.get("config")
+                if not config:
+                    self.output_textbox.insert("end", "Could not find config in report file.\n")
+                    return
+
+                # This is a bit of a simplification. We should ideally load the config
+                # into the UI, but for now, we'll just build the args and run the scan.
+                self.load_config_from_dict(config)
+                self.start_scan()
+                self.tab_view.set("Scan Output")
+
+        except Exception as e:
+            self.output_textbox.insert("end", f"Error re-running scan: {e}\n")
 
     def _create_advanced_tab_widgets(self):
         self.advanced_tab.grid_columnconfigure(0, weight=1)
@@ -528,6 +637,9 @@ class GarakGUI(customtkinter.CTk):
         with open(filepath, "r") as f:
             config_data = json.load(f)
 
+        self.load_config_from_dict(config_data)
+
+    def load_config_from_dict(self, config_data):
         # System Settings
         self.verbose_var.set(config_data.get("verbose", False))
         self.report_prefix_var.set(config_data.get("report_prefix", ""))
@@ -557,6 +669,14 @@ class GarakGUI(customtkinter.CTk):
         self.probe_options_var.set(config_data.get("probe_options", ""))
         self.detector_options_var.set(config_data.get("detector_options", ""))
         self.buff_options_var.set(config_data.get("buff_options", ""))
+
+    def load_option_file(self, var):
+        filepath = filedialog.askopenfilename(
+            title="Select an option file",
+            filetypes=[("All files", "*.*")]
+        )
+        if filepath:
+            var.set(filepath)
 
 
 if __name__ == "__main__":
