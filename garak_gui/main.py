@@ -60,11 +60,13 @@ class GarakGUI(customtkinter.CTk):
         self.config_tab.grid_rowconfigure(2, weight=1)
 
         # --- Create UI Frames ---
+        # Output tab must be created first as other frames may write to it
+        self._create_output_tab_widgets()
+
         self._create_system_settings_frame()
         self._create_run_settings_frame()
         self._create_plugin_settings_frame()
         self._create_execution_frame()
-        self._create_output_tab_widgets()
         self._create_reports_tab_widgets()
         self._create_advanced_tab_widgets()
         self._create_interactive_tab_widgets()
