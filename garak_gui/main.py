@@ -1,5 +1,5 @@
 import customtkinter
-from garak_connector import run_garak_command, get_plugins
+from garak_connector import run_garak_command, get_plugins, run_interactive_garak
 from PIL import Image, ImageTk
 import queue
 import threading
@@ -54,6 +54,7 @@ class GarakGUI(customtkinter.CTk):
         self.output_tab = self.tab_view.add("Scan Output")
         self.reports_tab = self.tab_view.add("Reports")
         self.advanced_tab = self.tab_view.add("Advanced")
+        self.interactive_tab = self.tab_view.add("Interactive Mode")
 
         self.config_tab.grid_columnconfigure(0, weight=1)
         self.config_tab.grid_rowconfigure(2, weight=1)
@@ -66,6 +67,7 @@ class GarakGUI(customtkinter.CTk):
         self._create_output_tab_widgets()
         self._create_reports_tab_widgets()
         self._create_advanced_tab_widgets()
+        self._create_interactive_tab_widgets()
 
         self.refresh_reports()
 
@@ -183,8 +185,12 @@ class GarakGUI(customtkinter.CTk):
         model_frame.grid(row=1, column=0, padx=5, pady=5, sticky="nsew")
         customtkinter.CTkLabel(model_frame, text="Model", font=customtkinter.CTkFont(weight="bold")).pack(anchor="w")
         customtkinter.CTkLabel(model_frame, text="Model Type:").pack(anchor="w", pady=(5,0))
-        generators = get_plugins("generators")
-        if not generators: generators = ["Not Found"]
+        generators, err = get_plugins("generators")
+        if err:
+            self.output_textbox.insert("end", f"Error loading generators:\n{err}\n")
+            generators = ["Error"]
+        elif not generators:
+            generators = ["Not Found"]
         model_type_menu = customtkinter.CTkOptionMenu(model_frame, variable=self.model_type_var, values=generators)
         model_type_menu.pack(fill="x")
         Tooltip(model_type_menu, "The type of model to test (e.g. openai, huggingface).")
@@ -260,8 +266,12 @@ class GarakGUI(customtkinter.CTk):
         customtkinter.CTkLabel(frame, text=plugin_type.title(), font=customtkinter.CTkFont(weight="bold")).pack(anchor="w", padx=10, pady=5)
         scroll_frame = customtkinter.CTkScrollableFrame(frame)
         scroll_frame.pack(fill="both", expand=True, padx=5, pady=5)
-        plugin_list = get_plugins(plugin_type)
-        if not plugin_list:
+        plugin_list, err = get_plugins(plugin_type)
+
+        if err:
+            self.output_textbox.insert("end", f"Error loading {plugin_type}:\n{err}\n")
+            customtkinter.CTkLabel(scroll_frame, text=f"Error loading {plugin_type}.").pack()
+        elif not plugin_list:
             customtkinter.CTkLabel(scroll_frame, text=f"No {plugin_type} found.").pack()
         else:
             for plugin_name in plugin_list:
@@ -273,16 +283,19 @@ class GarakGUI(customtkinter.CTk):
     def _create_execution_frame(self):
         frame = customtkinter.CTkFrame(self.config_tab, fg_color="transparent")
         frame.grid(row=3, column=0, pady=10, padx=10, sticky="ew")
-        frame.grid_columnconfigure([0,1], weight=1)
+        frame.grid_columnconfigure(0, weight=1) # Center the content
 
-        self.start_button = customtkinter.CTkButton(frame, text="Start Scan", command=self.start_scan)
-        self.start_button.grid(row=0, column=0, padx=(0, 5), sticky="ew")
+        content_frame = customtkinter.CTkFrame(frame, fg_color="transparent")
+        content_frame.grid(row=0, column=0)
 
-        self.stop_button = customtkinter.CTkButton(frame, text="Stop Scan", command=self.stop_scan, state="disabled")
-        self.stop_button.grid(row=0, column=1, padx=(5, 0), sticky="ew")
+        self.start_button = customtkinter.CTkButton(content_frame, text="Start Scan", command=self.start_scan)
+        self.start_button.pack(side="left", padx=(0, 5))
 
-        self.progress_bar = customtkinter.CTkProgressBar(frame, orientation="horizontal")
-        self.progress_bar.grid(row=1, column=0, columnspan=2, pady=(10, 0), sticky="ew")
+        self.stop_button = customtkinter.CTkButton(content_frame, text="Stop Scan", command=self.stop_scan, state="disabled")
+        self.stop_button.pack(side="left", padx=(5, 0))
+
+        self.progress_bar = customtkinter.CTkProgressBar(frame)
+        self.progress_bar.grid(row=1, column=0, pady=(10, 0), sticky="ew")
         self.progress_bar.set(0)
 
 
@@ -426,7 +439,21 @@ class GarakGUI(customtkinter.CTk):
         self.garak_thread = threading.Thread(target=self.run_garak_thread, args=(garak_args, self.output_queue))
         self.garak_thread.daemon = True
         self.garak_thread.start()
-        self.after(100, self.process_queue)
+
+        # run_garak_thread will set self.garak_process. We need to wait a moment
+        # to see if it was successful. This is a bit of a hack. A better way
+        # would be to use a future or a callback.
+        self.after(100, self.check_scan_start)
+
+    def check_scan_start(self):
+        if self.garak_process:
+            self.after(100, self.process_queue)
+        else:
+            # Scan failed to start, reset UI
+            self.start_button.configure(state="normal")
+            self.stop_button.configure(state="disabled")
+            self.progress_bar.stop()
+            self.progress_bar.set(0)
 
     def run_garak_thread(self, args, q):
         self.garak_process = run_garak_command(args, q)
@@ -586,6 +613,80 @@ class GarakGUI(customtkinter.CTk):
         thread.daemon = True
         thread.start()
 
+    def _create_interactive_tab_widgets(self):
+        self.interactive_tab.grid_columnconfigure(0, weight=1)
+        self.interactive_tab.grid_rowconfigure(0, weight=1)
+
+        self.interactive_output_textbox = customtkinter.CTkTextbox(self.interactive_tab)
+        self.interactive_output_textbox.grid(row=0, column=0, columnspan=2, padx=10, pady=10, sticky="nsew")
+        self.interactive_output_textbox.configure(state="disabled")
+
+        self.interactive_input_entry = customtkinter.CTkEntry(self.interactive_tab, placeholder_text="Type here and press Enter...")
+        self.interactive_input_entry.grid(row=1, column=0, padx=(10, 5), pady=10, sticky="ew")
+        self.interactive_input_entry.bind("<Return>", self.send_interactive_input)
+        self.interactive_input_entry.configure(state="disabled")
+
+
+        action_frame = customtkinter.CTkFrame(self.interactive_tab, fg_color="transparent")
+        action_frame.grid(row=2, column=0, columnspan=2, sticky="ew")
+        action_frame.grid_columnconfigure(0, weight=1)
+
+        self.start_interactive_button = customtkinter.CTkButton(action_frame, text="Start Interactive Session", command=self.start_interactive_session)
+        self.start_interactive_button.pack(side="left", padx=10, pady=10)
+
+        self.stop_interactive_button = customtkinter.CTkButton(action_frame, text="Stop Session", command=self.stop_interactive_session, state="disabled")
+        self.stop_interactive_button.pack(side="left", padx=10, pady=10)
+
+
+    def start_interactive_session(self):
+        self.interactive_output_textbox.configure(state="normal")
+        self.interactive_output_textbox.delete("1.0", "end")
+        self.interactive_input_entry.configure(state="normal")
+        self.start_interactive_button.configure(state="disabled")
+        self.stop_interactive_button.configure(state="normal")
+
+        self.interactive_output_queue = queue.Queue()
+        self.interactive_input_queue = queue.Queue()
+        self.interactive_process = run_interactive_garak(self.interactive_output_queue, self.interactive_input_queue)
+
+        if self.interactive_process:
+            self.after(100, self.process_interactive_queue)
+        else:
+            # Session failed to start, reset UI
+            self.start_interactive_button.configure(state="normal")
+            self.stop_interactive_button.configure(state="disabled")
+            self.interactive_input_entry.configure(state="disabled")
+
+    def stop_interactive_session(self):
+        if self.interactive_process and self.interactive_process.poll() is None:
+            self.interactive_input_queue.put(None) # Signal to stop
+            self.interactive_process.terminate()
+            self.interactive_output_queue.put("\n\n--- SESSION TERMINATED BY USER ---\n")
+        self.start_interactive_button.configure(state="normal")
+        self.stop_interactive_button.configure(state="disabled")
+        self.interactive_input_entry.configure(state="disabled")
+
+
+    def process_interactive_queue(self):
+        try:
+            while True:
+                line = self.interactive_output_queue.get_nowait()
+                if line is None: # Sentinel value
+                    self.stop_interactive_session()
+                    return
+                self.interactive_output_textbox.insert("end", line)
+                self.interactive_output_textbox.see("end")
+        except queue.Empty:
+            if self.interactive_process and self.interactive_process.poll() is None:
+                self.after(100, self.process_interactive_queue)
+            else:
+                self.stop_interactive_session()
+
+    def send_interactive_input(self, event):
+        command = self.interactive_input_entry.get()
+        if command:
+            self.interactive_input_queue.put(command)
+            self.interactive_input_entry.delete(0, "end")
 
     def save_config(self):
         config_data = {
