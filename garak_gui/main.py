@@ -1,10 +1,10 @@
 import customtkinter
-from garak_connector import run_garak_command, get_plugins
+from garak_connector import run_garak_command, get_plugins, start_interactive_process
 from PIL import Image, ImageTk
 import queue
 import threading
 import tkinter
-from tkinter import filedialog
+from tkinter import filedialog, messagebox
 import os
 import glob
 import json
@@ -53,6 +53,7 @@ class GarakGUI(customtkinter.CTk):
         self.config_tab = self.tab_view.add("Scan Configuration")
         self.output_tab = self.tab_view.add("Scan Output")
         self.reports_tab = self.tab_view.add("Reports")
+        self.interactive_tab = self.tab_view.add("Interactive")
         self.advanced_tab = self.tab_view.add("Advanced")
 
         self.config_tab.grid_columnconfigure(0, weight=1)
@@ -65,6 +66,7 @@ class GarakGUI(customtkinter.CTk):
         self._create_execution_frame()
         self._create_output_tab_widgets()
         self._create_reports_tab_widgets()
+        self._create_interactive_tab_widgets()
         self._create_advanced_tab_widgets()
 
         self.refresh_reports()
@@ -90,6 +92,7 @@ class GarakGUI(customtkinter.CTk):
         self.detector_vars = {}
         self.buff_vars = {}
         self.garak_process = None
+        self.interactive_process = None
         self.generator_options_var = customtkinter.StringVar()
         self.probe_options_var = customtkinter.StringVar()
         self.detector_options_var = customtkinter.StringVar()
@@ -225,16 +228,35 @@ class GarakGUI(customtkinter.CTk):
         frame = customtkinter.CTkFrame(parent)
         frame.pack_propagate(False)
         customtkinter.CTkLabel(frame, text=plugin_type.title(), font=customtkinter.CTkFont(weight="bold")).pack(anchor="w", padx=10, pady=5)
+
+        search_entry = customtkinter.CTkEntry(frame, placeholder_text=f"Search {plugin_type}...")
+        search_entry.pack(fill="x", padx=10, pady=(0, 5))
+
         scroll_frame = customtkinter.CTkScrollableFrame(frame)
         scroll_frame.pack(fill="both", expand=True, padx=5, pady=5)
         plugin_list = get_plugins(plugin_type)
+
+        checkboxes = []
         if not plugin_list:
             customtkinter.CTkLabel(scroll_frame, text=f"No {plugin_type} found.").pack()
         else:
             for plugin_name in plugin_list:
                 var = customtkinter.BooleanVar()
-                customtkinter.CTkCheckBox(scroll_frame, text=plugin_name, variable=var).pack(anchor="w", padx=5)
+                cb = customtkinter.CTkCheckBox(scroll_frame, text=plugin_name, variable=var)
+                cb.pack(anchor="w", padx=5)
                 var_dict[plugin_name] = var
+                checkboxes.append(cb)
+
+        def filter_plugins(event=None):
+            search_term = search_entry.get().lower()
+            for cb in checkboxes:
+                if search_term in cb.cget("text").lower():
+                    cb.pack(anchor="w", padx=5)
+                else:
+                    cb.pack_forget()
+
+        search_entry.bind("<KeyRelease>", filter_plugins)
+
         return frame
 
     def _create_execution_frame(self):
@@ -244,9 +266,11 @@ class GarakGUI(customtkinter.CTk):
 
         self.start_button = customtkinter.CTkButton(frame, text="Start Scan", command=self.start_scan)
         self.start_button.grid(row=0, column=0, padx=(0, 5), sticky="ew")
+        Tooltip(self.start_button, "Start the scan with the current configuration.")
 
         self.stop_button = customtkinter.CTkButton(frame, text="Stop Scan", command=self.stop_scan, state="disabled")
         self.stop_button.grid(row=0, column=1, padx=(5, 0), sticky="ew")
+        Tooltip(self.stop_button, "Stop the currently running scan.")
 
         # Config Preset Buttons
         preset_frame = customtkinter.CTkFrame(self.config_tab, fg_color="transparent")
@@ -254,8 +278,10 @@ class GarakGUI(customtkinter.CTk):
         preset_frame.grid_columnconfigure([0,1], weight=1)
         self.load_button = customtkinter.CTkButton(preset_frame, text="Load Config", command=self.load_config)
         self.load_button.grid(row=0, column=0, padx=(0, 5), sticky="ew")
+        Tooltip(self.load_button, "Load a scan configuration from a JSON file.")
         self.save_button = customtkinter.CTkButton(preset_frame, text="Save Config", command=self.save_config)
         self.save_button.grid(row=0, column=1, padx=(5, 0), sticky="ew")
+        Tooltip(self.save_button, "Save the current scan configuration to a JSON file.")
 
     def _create_output_tab_widgets(self):
         self.output_textbox = customtkinter.CTkTextbox(self.output_tab)
@@ -268,8 +294,15 @@ class GarakGUI(customtkinter.CTk):
         # Top frame for controls
         top_frame = customtkinter.CTkFrame(self.reports_tab)
         top_frame.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
-        self.refresh_reports_button = customtkinter.CTkButton(top_frame, text="Refresh Reports", command=self.refresh_reports)
+        self.refresh_reports_button = customtkinter.CTkButton(top_frame, text="Refresh", command=self.refresh_reports)
         self.refresh_reports_button.pack(side="left", padx=(0, 10))
+        Tooltip(self.refresh_reports_button, "Refresh the list of reports.")
+        self.load_rerun_button = customtkinter.CTkButton(top_frame, text="Load for Re-run", command=self.load_report_for_rerun)
+        self.load_rerun_button.pack(side="left", padx=(0, 10))
+        Tooltip(self.load_rerun_button, "Load the configuration from the selected report.")
+        self.delete_report_button = customtkinter.CTkButton(top_frame, text="Delete Report", command=self.delete_report, fg_color="dark red", hover_color="red")
+        self.delete_report_button.pack(side="left", padx=(0, 10))
+        Tooltip(self.delete_report_button, "Delete the selected report.")
 
         # Main frame with two panes
         main_frame = customtkinter.CTkFrame(self.reports_tab, fg_color="transparent")
@@ -429,6 +462,151 @@ class GarakGUI(customtkinter.CTk):
 
         self.report_content_textbox.configure(state="disabled")
 
+    def delete_report(self):
+        selection = self.report_listbox.curselection()
+        if not selection:
+            messagebox.showwarning("No Report Selected", "Please select a report to delete.")
+            return
+
+        selected_report = self.report_listbox.get(selection[0])
+
+        if messagebox.askyesno("Confirm Deletion", f"Are you sure you want to delete {selected_report}?"):
+            try:
+                os.remove(selected_report)
+                self.refresh_reports()
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to delete report: {e}")
+
+    def load_report_for_rerun(self):
+        selection = self.report_listbox.curselection()
+        if not selection:
+            messagebox.showwarning("No Report Selected", "Please select a report to load.")
+            return
+
+        selected_report = self.report_listbox.get(selection[0])
+
+        try:
+            with open(selected_report, "r") as f:
+                first_line = f.readline()
+                if not first_line:
+                    raise ValueError("Report file is empty.")
+                config_data = json.loads(first_line)
+                if config_data.get("entry_type") != "config":
+                    raise ValueError("The first line of the report is not a config entry.")
+        except FileNotFoundError:
+            messagebox.showerror("Error", f"Report file not found: {selected_report}")
+            return
+        except json.JSONDecodeError:
+            messagebox.showerror("Error", f"Failed to parse JSON from report config: {selected_report}")
+            return
+        except ValueError as e:
+            messagebox.showerror("Error", f"Invalid report file: {e}")
+            return
+        except Exception as e:
+            messagebox.showerror("Error", f"An unexpected error occurred while reading the report: {e}")
+            return
+
+        # System Settings
+        self.verbose_var.set(config_data.get("_config.system.verbose", False))
+        self.report_prefix_var.set(config_data.get("_config.reporting.report_prefix", ""))
+        self.narrow_output_var.set(config_data.get("_config.system.narrow_output", False))
+        self.parallel_requests_var.set(str(config_data.get("_config.system.parallel_requests", "")))
+        self.parallel_attempts_var.set(str(config_data.get("_config.system.parallel_attempts", "")))
+        self.skip_unknown_var.set(config_data.get("_config.system.skip_unknown", False))
+
+        # Run Settings
+        self.seed_var.set(str(config_data.get("_config.run.seed", "")))
+        self.deprefix_var.set(config_data.get("_config.run.deprefix", True))
+        self.eval_threshold_var.set(str(config_data.get("_config.run.eval_threshold", "0.5")))
+        self.generations_var.set(str(config_data.get("_config.run.generations", "10")))
+        self.config_var.set(config_data.get("_config.run.config", ""))
+
+        # Plugin Settings
+        self.model_type_var.set(config_data.get("_config.plugins.model_type", ""))
+        self.model_name_var.set(config_data.get("_config.plugins.model_name", ""))
+
+        probes = config_data.get("_config.plugins.probe_spec", "").split(',')
+        for name, var in self.probe_vars.items():
+            var.set(name in probes)
+
+        detectors = config_data.get("_config.plugins.detector_spec", "").split(',')
+        for name, var in self.detector_vars.items():
+            var.set(name in detectors)
+
+        buffs = config_data.get("_config.plugins.buff_spec", "").split(',')
+        for name, var in self.buff_vars.items():
+            var.set(name in buffs)
+
+        # Plugin Options - These aren't stored in the config entry, so we clear them
+        self.generator_options_var.set("")
+        self.probe_options_var.set("")
+        self.detector_options_var.set("")
+        self.buff_options_var.set("")
+
+        messagebox.showinfo("Config Loaded", "Report configuration loaded. Check the 'Scan Configuration' tab.")
+        self.tab_view.set("Scan Configuration")
+
+    def _create_interactive_tab_widgets(self):
+        self.interactive_tab.grid_columnconfigure(0, weight=1)
+        self.interactive_tab.grid_rowconfigure(0, weight=1)
+
+        self.interactive_textbox = customtkinter.CTkTextbox(self.interactive_tab)
+        self.interactive_textbox.grid(row=0, column=0, columnspan=2, padx=10, pady=10, sticky="nsew")
+        self.interactive_textbox.configure(state="disabled")
+
+        self.interactive_entry = customtkinter.CTkEntry(self.interactive_tab, placeholder_text="Enter command...")
+        self.interactive_entry.grid(row=1, column=0, padx=(10, 0), pady=10, sticky="ew")
+        self.interactive_entry.bind("<Return>", self.send_interactive_command)
+        Tooltip(self.interactive_entry, "Enter a command to send to the interactive garak session.")
+
+        self.interactive_send_button = customtkinter.CTkButton(self.interactive_tab, text="Send", command=self.send_interactive_command, state="disabled")
+        self.interactive_send_button.grid(row=1, column=1, padx=(10, 10), pady=10, sticky="e")
+        Tooltip(self.interactive_send_button, "Send the command to the interactive garak session.")
+
+        self.start_interactive_button = customtkinter.CTkButton(self.interactive_tab, text="Start Interactive Session", command=self.start_interactive_session)
+        self.start_interactive_button.grid(row=2, column=0, columnspan=2, padx=10, pady=10, sticky="ew")
+        Tooltip(self.start_interactive_button, "Start a new interactive garak session.")
+
+    def start_interactive_session(self):
+        self.interactive_textbox.configure(state="normal")
+        self.interactive_textbox.delete("1.0", "end")
+        self.start_interactive_button.configure(state="disabled")
+        self.interactive_send_button.configure(state="normal")
+
+        self.interactive_queue = queue.Queue()
+        self.interactive_process = start_interactive_process(self.interactive_queue)
+
+        if self.interactive_process:
+            self.after(100, self.process_interactive_queue)
+        else:
+            self.start_interactive_button.configure(state="normal")
+            self.interactive_send_button.configure(state="disabled")
+
+    def send_interactive_command(self, event=None):
+        command = self.interactive_entry.get()
+        if command and self.interactive_process and self.interactive_process.poll() is None:
+            self.interactive_process.stdin.write(command + "\n")
+            self.interactive_process.stdin.flush()
+            self.interactive_entry.delete(0, "end")
+
+    def process_interactive_queue(self):
+        try:
+            while True:
+                line = self.interactive_queue.get_nowait()
+                if line is None: # Sentinel value
+                    self.interactive_textbox.insert("end", "\n--- INTERACTIVE SESSION ENDED ---\n")
+                    self.start_interactive_button.configure(state="normal")
+                    self.interactive_send_button.configure(state="disabled")
+                    self.interactive_process = None
+                    return
+                self.interactive_textbox.insert("end", line)
+                self.interactive_textbox.see("end")
+        except queue.Empty:
+            if self.interactive_process and self.interactive_process.poll() is None:
+                self.after(100, self.process_interactive_queue)
+            else: # Process died
+                self.after(100, self.process_interactive_queue) # one last check
+
     def _create_advanced_tab_widgets(self):
         self.advanced_tab.grid_columnconfigure(0, weight=1)
 
@@ -438,16 +616,24 @@ class GarakGUI(customtkinter.CTk):
         customtkinter.CTkLabel(frame, text="Advanced Commands", font=customtkinter.CTkFont(size=16, weight="bold")).grid(row=0, column=0, columnspan=3, pady=(5, 10), sticky="w")
 
         # Plugin Info
-        customtkinter.CTkButton(frame, text="Plugin Info", command=lambda: self.run_advanced_command("--plugin_info")).grid(row=1, column=0, padx=10, pady=5)
+        plugin_info_button = customtkinter.CTkButton(frame, text="Plugin Info", command=lambda: self.run_advanced_command("--plugin_info"))
+        plugin_info_button.grid(row=1, column=0, padx=10, pady=5)
+        Tooltip(plugin_info_button, "Get information about a specific plugin.")
 
         # List Config
-        customtkinter.CTkButton(frame, text="List Config", command=lambda: self.run_advanced_command("--list_config")).grid(row=2, column=0, padx=10, pady=5)
+        list_config_button = customtkinter.CTkButton(frame, text="List Config", command=lambda: self.run_advanced_command("--list_config"))
+        list_config_button.grid(row=2, column=0, padx=10, pady=5)
+        Tooltip(list_config_button, "Print the current configuration.")
 
         # Fix
-        customtkinter.CTkButton(frame, text="Fix", command=lambda: self.run_advanced_command("--fix")).grid(row=3, column=0, padx=10, pady=5)
+        fix_button = customtkinter.CTkButton(frame, text="Fix", command=lambda: self.run_advanced_command("--fix"))
+        fix_button.grid(row=3, column=0, padx=10, pady=5)
+        Tooltip(fix_button, "Try to fix a misconfigured plugin.")
 
         self.advanced_args_var = customtkinter.StringVar()
-        customtkinter.CTkEntry(frame, textvariable=self.advanced_args_var, placeholder_text="Enter arguments for command...").grid(row=1, column=1, rowspan=3, padx=10, pady=5, sticky="nsew")
+        advanced_args_entry = customtkinter.CTkEntry(frame, textvariable=self.advanced_args_var, placeholder_text="Enter arguments for command...")
+        advanced_args_entry.grid(row=1, column=1, rowspan=3, padx=10, pady=5, sticky="nsew")
+        Tooltip(advanced_args_entry, "Enter any additional arguments for the selected advanced command.")
         frame.grid_columnconfigure(1, weight=1)
 
     def run_advanced_command(self, command):
@@ -559,6 +745,9 @@ class GarakGUI(customtkinter.CTk):
         self.buff_options_var.set(config_data.get("buff_options", ""))
 
 
-if __name__ == "__main__":
+def main():
     app = GarakGUI()
     app.mainloop()
+
+if __name__ == "__main__":
+    main()

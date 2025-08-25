@@ -14,25 +14,18 @@ def _parse_plugin_list(output, plugin_type):
     # Regex to remove ANSI escape codes
     ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
-    # The list command for generators is different, it's just the name
-    prefix = f"{plugin_type}:"
-    if plugin_type == "generators":
-        prefix = ""
+    lines = output.strip().splitlines()
+    if not lines:
+        return []
 
-    for line in output.splitlines():
+    # The first line is a header like "probes:" or "generators:", we can skip it.
+    for line in lines[1:]:
         line = ansi_escape.sub('', line).strip()
-
-        if plugin_type != "generators" and not line.startswith(prefix):
+        if not line:
             continue
 
-        if plugin_type == "generators":
-             # generators list is just the names, one per line, after a header
-             if ":" in line or "garak" in line.lower() or not line:
-                 continue
-             plugin_name = line.strip()
-        else:
-            # Take the part after the prefix, split by space, take the first element
-            plugin_name = line[len(prefix):].strip().split(" ")[0]
+        # For all plugin types, the name is the first word on the line.
+        plugin_name = line.split(" ")[0]
 
         if plugin_name:
             plugins.append(plugin_name)
@@ -69,6 +62,46 @@ def run_garak_command(args, output_queue):
     try:
         process = subprocess.Popen(
             command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            universal_newlines=True,
+        )
+
+        def enqueue_output():
+            for line in iter(process.stdout.readline, ''):
+                output_queue.put(line)
+            process.stdout.close()
+            process.wait()
+            output_queue.put(None) # Sentinel value
+
+        thread = threading.Thread(target=enqueue_output)
+        thread.daemon = True
+        thread.start()
+
+    except FileNotFoundError:
+        output_queue.put("Error: 'python' command not found. Make sure Python is in your PATH.\n")
+        output_queue.put(None)
+    except Exception as e:
+        output_queue.put(f"An unexpected error occurred: {e}\n")
+        output_queue.put(None)
+
+    return process
+
+def start_interactive_process(output_queue):
+    """
+    Starts a garak interactive session and streams its output to a queue.
+
+    :param output_queue: A queue.Queue object to put output lines on.
+    :return: The subprocess.Popen object.
+    """
+    command = ["python", "-m", "garak", "--interactive"]
+    process = None
+    try:
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
