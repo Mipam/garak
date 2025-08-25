@@ -1,3 +1,7 @@
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import customtkinter
 from garak_connector import run_garak_command, get_plugins, start_interactive_process
 from PIL import Image, ImageTk
