@@ -1,5 +1,5 @@
 import customtkinter
-from garak_connector import run_garak_command, get_plugins, start_interactive_process
+from .garak_connector import run_garak_command, get_plugins, start_interactive_process
 from PIL import Image, ImageTk
 import queue
 import threading
