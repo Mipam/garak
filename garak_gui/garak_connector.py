@@ -1,6 +1,14 @@
 import subprocess
 import threading
 import re
+import os
+
+def _get_subprocess_env():
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    env = os.environ.copy()
+    python_path = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = f"{project_root}{os.pathsep}{python_path}"
+    return env
 
 def _parse_plugin_list(output, plugin_type):
     """
@@ -39,11 +47,9 @@ def get_plugins(plugin_type):
     :return: A list of plugin names.
     """
     try:
-        # Note: garak's command is --list_probes, but for generators it's --list-generators
-        # Let's check the cli.py again.
-        # Oh, it's `list_generators`. The help text in the docs was wrong. Good thing I checked.
         command = ["python", "-m", "garak", f"--list_{plugin_type}"]
-        output = subprocess.check_output(command, text=True)
+        env = _get_subprocess_env()
+        output = subprocess.check_output(command, text=True, env=env)
         return _parse_plugin_list(output, plugin_type)
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         print(f"Error getting {plugin_type}: {e}")
@@ -59,6 +65,7 @@ def run_garak_command(args, output_queue):
     """
     command = ["python", "-m", "garak"] + args
     process = None
+    env = _get_subprocess_env()
     try:
         process = subprocess.Popen(
             command,
@@ -67,6 +74,7 @@ def run_garak_command(args, output_queue):
             text=True,
             bufsize=1,
             universal_newlines=True,
+            env=env
         )
 
         def enqueue_output():
@@ -98,6 +106,7 @@ def start_interactive_process(output_queue):
     """
     command = ["python", "-m", "garak", "--interactive"]
     process = None
+    env = _get_subprocess_env()
     try:
         process = subprocess.Popen(
             command,
@@ -107,6 +116,7 @@ def start_interactive_process(output_queue):
             text=True,
             bufsize=1,
             universal_newlines=True,
+            env=env
         )
 
         def enqueue_output():
